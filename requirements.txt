@@ -1,0 +1,44 @@
+# ============================================================
+#  LocalMuse V2 - Core dependencies (REQUIRED)
+#
+#  This file is the single source of truth for these package
+#  versions. setup.bat installs it via:
+#    venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+#  When changing a version constraint below, edit ONLY this file -
+#  setup.bat does not hardcode any of these versions separately.
+#
+#  Optional / graceful-degradation features (pose search, OCR,
+#  multilingual search, VLM annotation) are in
+#  requirements-optional.txt instead - LocalMuse still runs if
+#  those fail to install, just with the matching feature disabled.
+#
+#  NOT in either requirements file (handled separately by
+#  setup.bat - see LOCALMUSE_MODIFICATION_GUIDE.md):
+#    - torch / torchvision
+#        Installed FIRST, from a GPU-specific index: CUDA 12.4 if
+#        an NVIDIA GPU is detected (nvidia-smi), otherwise CPU-only.
+#        A single version line here would force the same index for
+#        everyone.
+#    - OpenAI CLIP (git+https://github.com/openai/CLIP.git)
+#        Not published on PyPI; requires Git. Installed by setup.bat
+#        only if Git is available. Required by
+#        src/core/clip_model.py for semantic search.
+#    - flash-attn (optional, opt-in via install_flash_attn.bat /
+#        LOCALMUSE_ENABLE_FLASH_ATTN=1)
+# ============================================================
+
+# --- Web server ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# --- Core ML / image processing ---
+# numpy MUST stay <2.0: OpenAI CLIP requires the numpy 1.x API.
+numpy>=1.24.0,<2.0
+Pillow>=10.0.0
+opencv-python-headless>=4.8.0
+faiss-cpu>=1.7.4
+ftfy>=6.1.1
+regex>=2023.0.0
+tqdm>=4.65.0
+timm>=0.9.0

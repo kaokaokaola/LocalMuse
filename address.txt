@@ -1,0 +1,268 @@
+================================================================
+  LocalMuse V2 — File Address Reference
+  All local file paths, slot index locations, and maintenance notes
+================================================================
+
+Last updated: 2026-05-28
+Project root: <install_dir>\  (the folder where LocalMuse_EN.bat lives)
+
+All paths marked with  <install_dir>  are relative to the project root.
+All paths marked with  <library>      are relative to your open .library folder.
+All paths marked with  <home>         expand to your Windows user home directory
+                                      (e.g. C:\Users\YourName)
+
+
+================================================================
+  SECTION 1 — PROJECT FILES
+================================================================
+
+Launchers
+  <install_dir>\LocalMuse_EN.bat      English startup launcher
+  <install_dir>\LocalMuse.bat         Chinese startup launcher
+
+Installers
+  <install_dir>\setup.bat             Unified 8-step dependency installer (English + Chinese)
+                                      Run this once before first launch; re-run to repair.
+  <install_dir>\setup_en.bat          Thin wrapper — delegates to setup.bat (kept for compatibility)
+
+Entry point
+  <install_dir>\main.py               Application entry point; parses --port/--host
+
+Source code
+  <install_dir>\src\server.py         FastAPI routes, WebSocket push, REST API
+  <install_dir>\src\config\settings.py       Application settings (all defaults here)
+  <install_dir>\src\infra\library_mgr.py     Library open/create/read/write logic
+  <install_dir>\src\infra\index_store.py     FAISS slot index load/save (v4 format)
+  <install_dir>\src\core\clip_model.py       CLIP / M-CLIP text+image encoder
+  <install_dir>\src\core\vector_math.py      VectorIndex, normalize, fuse_scores
+  <install_dir>\src\core\image_proc.py       Canny edges, color palette, thumbnails
+  <install_dir>\src\core\depth_model.py      MiDaS depth encoder (optional)
+  <install_dir>\src\core\pose_model.py       YOLOv8 pose encoder (optional)
+  <install_dir>\src\core\ocr_model.py        EasyOCR text extractor (optional)
+  <install_dir>\src\services\indexer.py      Import pipeline (CLIP → FAISS → save)
+  <install_dir>\src\services\searcher.py     3-phase retrieval pipeline
+  <install_dir>\src\ui\frontend\app.html     Single-file browser frontend (~1900 lines)
+
+Crash / diagnostics
+  <install_dir>\localmuse_crash.log   Written on startup crash; auto-deleted on next clean launch
+
+Python virtual environment
+  <install_dir>\venv\                 Created by setup_en.bat
+  <install_dir>\venv\Scripts\python.exe   Python interpreter used at runtime
+
+
+================================================================
+  SECTION 2 — USER SETTINGS (persisted across sessions)
+================================================================
+
+Settings file
+  <home>\.localmuse\settings.json
+
+  This file is created automatically on first run.
+  It persists user preferences including:
+
+    language            UI language ("en" / "zh")
+    last_library_path   Path of the last opened library (restored on startup)
+
+    Modality toggles (true/false):
+      semantic_enabled    Text-to-image CLIP search
+      color_enabled       Dominant-color similarity search
+      structure_enabled   Canny edge / sketch search
+      depth_enabled       MiDaS depth structure search  (requires ultralytics)
+      pose_enabled        YOLOv8 human pose search       (requires ultralytics)
+      ocr_enabled         In-image text search           (requires easyocr)
+
+    Modality weights (float, used in Phase 3 score fusion):
+      semantic_weight     default 1.0
+      color_weight        default 0.6
+      structure_weight    default 0.8
+      depth_weight        default 0.5
+      pose_weight         default 0.5
+
+    Search parameters:
+      top_k               Max results returned (default 200)
+      thumbnail_size      Thumbnail pixel width (default 360)
+
+  To reset all settings to defaults, delete:
+    <home>\.localmuse\settings.json
+
+
+================================================================
+  SECTION 3 — LIBRARY STRUCTURE (per .library folder)
+================================================================
+
+When you create or open a library, LocalMuse uses this folder layout:
+
+  <library>\
+    metadata.json                   Library header (name, version, created_at)
+    tags.json                       Global tag list (union of all image tags)
+
+    ── FAISS Slot Index Files (v4 format) ──────────────────────
+    index_semantic.faiss            Semantic slot FAISS binary  (512D, Cosine)
+    index_semantic.map              Semantic slot UID list       (JSON array)
+    index_sketch.faiss              Sketch slot FAISS binary     (4096D, L2)
+    index_sketch.map                Sketch slot UID list         (JSON array)
+    index_depth.faiss               Depth slot FAISS binary      (4096D, L2)
+    index_depth.map                 Depth slot UID list          (JSON array)
+    index_pose.faiss                Pose slot FAISS binary       (34D, L2)
+    index_pose.map                  Pose slot UID list           (JSON array)
+
+    NOTE: vectors.index (v3 legacy) may also be present after migration.
+          It is kept as a backup and is no longer used by the application.
+
+    ── Per-Image Folders ───────────────────────────────────────
+    images\
+      <UID>.info\                   One folder per imported image
+        <original_filename>         Copy of the original image file
+        thumbnail.png               360px thumbnail (fixed filename, O(1) lookup)
+        metadata.json               Per-image metadata (see Section 4)
+
+
+================================================================
+  SECTION 4 — PER-IMAGE METADATA  (<library>\images\<UID>.info\metadata.json)
+================================================================
+
+Each imported image gets a metadata.json with these fields:
+
+  id                  Unique image ID (13-char hex, e.g. "A3F9D21B7C04E")
+  name                Filename stem (without extension)
+  ext                 File extension (without dot, e.g. "jpg")
+  width / height      Image dimensions in pixels
+  file_size           File size in bytes
+  dominant_color      [R, G, B] most prominent color
+  color_palette       [[R,G,B], ...]  basic color palette (6 colors)
+  color_palette_ratio [{rgb:[R,G,B], ratio:0.xx}, ...]  Eagle-style palette with frequency
+  exif                {camera, iso, shutter, aperture, focal_length, date_taken, has_gps}
+  tags                ["tag1", "tag2", ...]  user-assigned tags
+  annotation          Free-text note set by user
+  source_path         Original file path at time of import
+  original_filename   Filename stored in .info folder (used for O(1) path lookup)
+  ocr_text            Text extracted from image by EasyOCR (empty if OCR disabled)
+
+  indexed_slots       Model version record for each search slot:
+    semantic:  {model, version, date}   e.g. "clip-vit-b32" / "clip-vit-b32-mclip"
+    sketch:    {model, version, date}   e.g. "canny-64x64"
+    depth:     {model, version, date}   e.g. "midas-v3"       (only if depth was on)
+    pose:      {model, version, date}   e.g. "yolov8n-pose"   (only if pose was on)
+
+  created_at / modified_at / import_at    ISO 8601 UTC timestamps
+
+
+================================================================
+  SECTION 5 — SEARCH SLOT SPECIFICATIONS
+================================================================
+
+Slot        Dim    Metric    Model            Enabled by default
+─────────────────────────────────────────────────────────────
+semantic    512    Cosine    CLIP ViT-B/32    YES   (requires clip package)
+                   (IndexFlatIP)
+                   With M-CLIP: multilingual text encoding (50+ languages)
+
+sketch      4096   L2        Canny 64×64      YES   (uses OpenCV, no extra model)
+                   (IndexFlatL2)
+
+depth       4096   L2        MiDaS v3         NO    (requires timm / depth model)
+                   (IndexFlatL2)
+
+pose        34     L2        YOLOv8n-pose     NO    (requires ultralytics)
+                   (IndexFlatL2)
+
+
+================================================================
+  SECTION 6 — THREE-PHASE RETRIEVAL PIPELINE
+================================================================
+
+Phase 1 — Coarse Recall  (per-slot FAISS search)
+  Each active slot independently returns up to 200 candidates.
+  Candidate pool = union of all slot results.
+  COARSE_K = 200  (hardcoded in src\services\searcher.py)
+
+Phase 2 — Hard Filter  (metadata-based)
+  OCR text: substring match against stored ocr_text field.
+  Color:    NOT a hard filter — contributes a soft score in Phase 3.
+
+Phase 3 — Re-rank / Score Fusion
+  1. Per-slot min-max normalization → scores in [0, 1]
+  2. Weighted sum:  Σ( score_i × w_i )
+     Weights come from settings.json (normalized over enabled slots)
+  3. Sort descending, return top_k results
+
+
+================================================================
+  SECTION 7 — MAINTENANCE GUIDE
+================================================================
+
+── Upgrading a search model (e.g. switch from CLIP to a better model) ──
+
+  Step 1: Install the new model package (update setup_en.bat if needed)
+  Step 2: Update the encoder in src\core\clip_model.py (or the relevant model file)
+  Step 3: The system detects stale slots via indexed_slots.version in each metadata.json
+  Step 4: Re-import images into that library (or rebuild only the affected slot's
+          index_{slot}.faiss + index_{slot}.map — other slots are untouched)
+
+── Enabling/disabling search modalities ──
+
+  Edit  <home>\.localmuse\settings.json
+  Set   "depth_enabled": true  (or false) etc.
+  Restart LocalMuse.
+
+── Deleting and rebuilding the FAISS index (without re-importing images) ──
+
+  Delete the slot files you want to rebuild:
+    <library>\index_semantic.faiss
+    <library>\index_semantic.map
+  Then re-import the images — only the deleted slots will be rebuilt.
+  (Other slots remain intact.)
+
+── Recovering from index corruption ──
+
+  Delete all index_{slot}.faiss and index_{slot}.map files.
+  Re-import all images to rebuild from scratch.
+  The original image files in  images\<UID>.info\  are never modified.
+
+── Moving or renaming the library folder ──
+
+  The library is fully self-contained.
+  Move the entire  <library>\  folder to a new location.
+  Open it in LocalMuse via the Open Library button.
+  Update  last_library_path  in settings.json if needed.
+
+── Checking port conflicts ──
+
+  Default port: 17788
+  To use a different port: run  "%VENV_PY%" main.py --port 8080
+  Or edit LocalMuse_EN.bat and add  --port XXXX  to the launch line.
+
+
+================================================================
+  SECTION 8 — QUICK REFERENCE: KEY FILE ADDRESSES
+================================================================
+
+  [User preferences]
+  %USERPROFILE%\.localmuse\settings.json
+
+  [Per-library FAISS indices]
+  <library>\index_semantic.faiss / .map
+  <library>\index_sketch.faiss   / .map
+  <library>\index_depth.faiss    / .map
+  <library>\index_pose.faiss     / .map
+
+  [Per-image metadata]
+  <library>\images\<UID>.info\metadata.json
+
+  [Per-image thumbnail]
+  <library>\images\<UID>.info\thumbnail.png
+
+  [Crash log]
+  <install_dir>\localmuse_crash.log
+
+  [Startup launcher (English)]
+  <install_dir>\LocalMuse_EN.bat
+
+  [Startup launcher (Chinese)]
+  <install_dir>\LocalMuse.bat
+
+  [Dependency installer (unified, English)]
+  <install_dir>\setup.bat
+
+================================================================
