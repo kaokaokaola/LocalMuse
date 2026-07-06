@@ -1,97 +1,95 @@
-# LocalMuse V2
+# LocalMuse V2.1
 
-Multimodal local image search for designers — search your reference library by
-**meaning, sketch, structure/depth, and pose**, entirely on your own machine.
-No cloud, no upload, no subscription.
+Multimodal local image search for designers — search your reference library by **meaning, sketch, structure/depth, and pose**, entirely on your own machine. No cloud, no upload, no subscription.
 
-> Companion project for a paper presented at **CDRF 2026**. This repository
-> hosts the V2 implementation.
+> Companion project for a paper presented at **CDRF 2026**. This repository hosts the V2 implementation. **v2.1** is the current release — see [What's New](#whats-new-in-v21) below.
+
+---
+
+## What's New in v2.1
+
+**v2.1 makes the duplicate‑detection workflow feel like a real product.** The rework is scoped to the Duplicates panel only — the main grid and lightbox delete behavior are unchanged.
+
+- **Recycle bin (soft delete).** Removing a duplicate now moves it to a per‑library `.trash/` folder instead of deleting it outright. Your original source files on disk are left untouched unless you explicitly tick *"Also delete source"*.
+- **One‑click Undo.** Every delete raises a 7‑second Undo toast. Undo restores the images *and* their exact search vectors instantly, so a mistaken cleanup costs nothing.
+- **Cross‑group batch selection.** Tick individual images across any groups, use a group‑level *"select smaller"* toggle, or *"Select smaller (all)"* to mark every non‑largest version in one shot. The action bar shows how many are selected and how much space they will free.
+- **Local refresh — no full re‑scan.** After a delete the panel re‑renders instantly from the cached model (groups that drop below two items disappear automatically). No more waiting for the whole library to be re‑scanned.
+- **Progress & result feedback.** Deletes report how many images were removed, how much space was freed, and how many (if any) failed.
+- **New batch API endpoints.** `POST /api/images/delete`, `POST /api/images/restore`, `GET /api/trash`, and `POST /api/trash/purge` power the recycle bin; FAISS slots are rebuilt once per batch and the exact vectors are captured so an undo is lossless.
+
+Full details in [`CHANGELOG.md`](CHANGELOG.md).
+
+---
 
 ## Features
 
-- **Semantic search** — CLIP-based text-to-image and image-to-image search.
-- **Sketch search** — query by rough composition / structure (Canny-based
-  structure features).
+- **Semantic search** — CLIP‑based text‑to‑image and image‑to‑image search.
+- **Sketch search** — query by rough composition / structure (Canny‑based structure features).
 - **Depth & structure** — match spatial depth and massing.
-- **Pose search** — retrieve images by body pose (YOLOv8-Pose).
-- **AI auto-annotation** — local vision-language model (Qwen3-VL /
-  Qwen2.5-VL) tags and describes your library automatically.
-- **Multilingual search** (optional) — M-CLIP for Chinese/Japanese/Korean and
-  50+ languages.
-- Runs as a local web app: `python main.py` starts a FastAPI/uvicorn server
-  on `http://localhost:17788` and opens it in your browser. No Qt, no
-  cloud services.
+- **Pose search** — retrieve images by body pose (YOLOv8‑Pose).
+- **AI auto‑annotation** — a local vision‑language model (Qwen3‑VL / Qwen2.5‑VL) tags and describes your library automatically.
+- **Multilingual search** (optional) — M‑CLIP for Chinese / Japanese / Korean and 50+ languages, reusing the same indexed image vectors (no re‑indexing needed).
+- **Duplicate & flipped‑image detection** with a recycle bin, batch selection, and undo (new in v2.1).
+- **Runs as a local web app** — `python main.py` starts a FastAPI / uvicorn server on `http://localhost:17788` and opens it in your browser. No Qt, no cloud services.
+
+---
 
 ## Requirements
 
-- Windows 10/11, x64
-- Python 3.10–3.12 (installer will look for these via the `py` launcher or
-  `PATH`)
-- Git (only needed to install OpenAI CLIP from source — `setup.bat` will
-  warn and continue without it if missing)
-- NVIDIA GPU + driver supporting CUDA 12.4 — **optional**, but strongly
-  recommended for AI annotation and faster indexing. CPU-only works for
-  search.
+- **Windows** (the `.bat` launchers target Windows; the Python code itself is cross‑platform).
+- **Python 3.10 – 3.12** (add Python to PATH during install).
+- **Git** — required to install OpenAI CLIP from source (semantic search). Optional but strongly recommended.
+- Runs **CPU‑only** — no CUDA / GPU required.
+- ~2–4 GB of free disk for model weights and dependencies.
 
-## Quick start
+Core dependencies (installed automatically by `setup.bat`): FastAPI, uvicorn, PyTorch (CPU), torchvision, Pillow, OpenCV (headless), `numpy<2.0`, faiss‑cpu, ftfy, regex, tqdm, timm. Optional: `ultralytics` (pose), `easyocr` (in‑image OCR), `transformers` + `multilingual-clip` (multilingual search).
+
+---
+
+## Installation
 
 ```bat
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
-setup.bat        REM one-time dependency install into .\venv\
-LocalMuse.bat    REM starts the server and opens the browser
+:: 1. One‑time setup — creates a self‑contained virtual environment in .\venv\
+::    and installs every dependency (PyTorch CPU, FastAPI, faiss, CLIP, M‑CLIP…).
+setup.bat
 ```
 
-`setup.bat` is idempotent — safe to re-run any time to repair a broken
-environment. See [`requirements.txt`](requirements.txt) and
-[`requirements-optional.txt`](requirements-optional.txt) for what gets
-installed and why.
+`setup.bat` is idempotent: if the environment is already complete it skips straight to verification, and re‑running it repairs a broken install. If Git is missing, semantic search is skipped with clear instructions to enable it later.
 
-## Project layout
+---
+
+## Usage
+
+```bat
+:: Launch the app (uses .\venv\, then an embedded .\python\, then system Python)
+LocalMuse.bat
+```
+
+Then open **http://127.0.0.1:17788** in your browser (it opens automatically). Press `Ctrl+C` in the console to quit. If the app crashes, details are written to `localmuse_crash.log`.
+
+---
+
+## Project structure
 
 ```
-main.py                  Entry point (FastAPI/uvicorn server)
-LocalMuse.bat             Launcher (prefers .\venv\, falls back to .\python\)
-setup.bat                  One-time / repair dependency installer -> .\venv\
-requirements.txt           Required dependencies (single source of truth)
-requirements-optional.txt  Optional features (pose, OCR, multilingual, VLM annotation)
+main.py                     Entry point — launches the FastAPI/uvicorn server
+requirements.txt            Python dependencies (CLIP installed separately from Git)
+setup.bat                   One‑time dependency installer → .\venv\
+LocalMuse.bat               Launcher (venv → embedded python → system python)
 src/
-  core/                    Model wrappers (CLIP, depth, pose, annotation, etc.)
-  infra/                   Index storage, library management
-  services/                Indexing, search, intent engine
-  config/                  Settings
-  server.py                FastAPI app
-  ui/frontend/             Web UI (single-page app)
-test_search.py            Search smoke test
+  core/                     CLIP model, image processing, vector math
+  infra/                    Library catalog (SQLite) + FAISS index store + recycle bin
+  services/                 Indexer, searcher, auto‑tagger, session tracker
+  server.py                 FastAPI REST + WebSocket API
+  ui/frontend/app.html      Single‑file web UI
 ```
 
-## Optional / advanced scripts
+---
 
-These are **not required** for a normal install — `setup.bat` +
-`LocalMuse.bat` is enough for most users.
+## Privacy
 
-| Script | Purpose | When to use |
-|---|---|---|
-| `setup_annotation.bat` | Force-reinstall CUDA torch / re-check VLM annotation deps | Only for **older venvs** created before `setup.bat` had GPU auto-detection, or venvs missing `requirements-optional.txt` packages. On a fresh install this is a no-op. |
-| `install_flash_attn.bat` | Installs a prebuilt FlashAttention 2 wheel | Optional speed-up for VLM annotation. Pinned to `torch==2.6.0+cu124` — if you change the PyTorch/CUDA version in `setup.bat`, this script's wheel URL must be updated too. |
-| `build_portable_python.bat` | Builds a self-contained `.\python\` runtime (~6 GB) from `.\venv\` | **Maintainers only** — used to produce a no-install distributable for users without Python/internet. See [`PORTABLE_DEPLOYMENT.md`](PORTABLE_DEPLOYMENT.md). |
-| `cleanup_venv.bat` | Removes `.\venv\` after `.\python\` is verified to work | Maintainers only, used after `build_portable_python.bat`. |
-
-## Data & privacy
-
-All indexing and search run locally. Model weights (CLIP, Qwen3-VL,
-EasyOCR, depth/pose models — several GB total) are downloaded automatically
-from Hugging Face on first use and cached under your user profile
-(`~/.cache/huggingface`, etc.) — they are **not** part of this repository.
-Your image library stays wherever you point LocalMuse to; nothing is
-uploaded.
-
-## Development notes
-
-See [`LOCALMUSE_MODIFICATION_GUIDE.md`](LOCALMUSE_MODIFICATION_GUIDE.md) for
-search-slot definitions, the annotation model setup, and dependency
-management rules — read this before modifying search or annotation code.
+Everything runs locally. Your images, the index, and all search happen on your own machine — nothing is uploaded, and no account or subscription is required.
 
 ## License
 
-[MIT](LICENSE)
+MIT — see [`LICENSE`](LICENSE).

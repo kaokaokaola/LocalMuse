@@ -8,24 +8,15 @@ cd /d "%~dp0"
 :: Installs all dependencies into .\venv\ (Python virtual environment).
 :: Run this once before launching LocalMuse for the first time.
 :: Re-run at any time to repair a broken installation.
-::
-:: Package versions live in requirements.txt (required) and
-:: requirements-optional.txt (optional / graceful-degradation
-:: features). To change a dependency version, edit those files -
-:: not this script. The only exceptions are torch/torchvision and
-:: OpenAI CLIP, which this script installs separately (see Steps
-:: 3 and 6 below, and requirements.txt for why).
 
 set "ROOT=%~dp0"
 set "VENV=%ROOT%venv"
 set "VENV_PY=%ROOT%venv\Scripts\python.exe"
 set "VENV_PIP=%ROOT%venv\Scripts\pip.exe"
-set "REQ=%ROOT%requirements.txt"
-set "REQ_OPT=%ROOT%requirements-optional.txt"
 
 echo.
 echo ============================================================
-echo   LocalMuse V2  ^|  Dependency Setup  ^(6 steps^)
+echo   LocalMuse V2  ^|  Dependency Setup  ^(8 steps^)
 echo ============================================================
 echo.
 
@@ -82,9 +73,9 @@ if not errorlevel 1 (
 echo.
 
 :: ============================================================
-::  STEP 1/6  Create virtual environment in .\venv\
+::  STEP 1/8  Create virtual environment in .\venv\
 :: ============================================================
-echo [1/6] Creating virtual environment...
+echo [1/8] Creating virtual environment...
 if exist "%VENV%" (
     echo        Existing venv found  -  reusing it.
 ) else (
@@ -99,9 +90,9 @@ if exist "%VENV%" (
 echo.
 
 :: ============================================================
-::  STEP 2/6  Upgrade pip, setuptools, wheel
+::  STEP 2/8  Upgrade pip, setuptools, wheel
 :: ============================================================
-echo [2/6] Upgrading pip / setuptools / wheel...
+echo [2/8] Upgrading pip / setuptools / wheel...
 "%VENV_PY%" -m pip install --upgrade pip setuptools wheel -q
 if errorlevel 1 (
     echo [WARN]  pip upgrade had issues  -  continuing anyway.
@@ -111,83 +102,101 @@ if errorlevel 1 (
 echo.
 
 :: ============================================================
-::  STEP 3/6  PyTorch  -  GPU-aware install
-::
-::  If an NVIDIA GPU is detected (nvidia-smi runs successfully),
-::  install the CUDA 12.4 build directly (~2.5 GB). Otherwise
-::  install the CPU-only build (~300 MB).
-::
-::  This installs the right build the first time, so
-::  setup_annotation.bat no longer needs to download torch again
-::  and force-reinstall it with --force-reinstall in the common
-::  case. setup_annotation.bat remains as a repair tool for the
-::  case where no GPU/driver was available when setup.bat ran.
+::  STEP 3/8  PyTorch CPU build  (~300 MB)
+::  Pinned to the official CPU wheel index.
+::  LocalMuse runs on CPU  -  no CUDA required.
 :: ============================================================
-echo [3/6] Installing PyTorch...
-nvidia-smi >nul 2>&1
-if not errorlevel 1 (
-    echo        NVIDIA GPU detected - installing PyTorch ^(CUDA 12.4, ~2.5 GB^)...
-    echo        This may take a while, please wait...
-    "%VENV_PY%" -m pip install torch torchvision ^
-        --index-url https://download.pytorch.org/whl/cu124 -q
-) else (
-    echo        No NVIDIA GPU detected - installing PyTorch ^(CPU, ~300 MB^)...
-    "%VENV_PY%" -m pip install torch torchvision ^
-        --index-url https://download.pytorch.org/whl/cpu -q
-)
+echo [3/8] Installing PyTorch ^(CPU^)  -  ~300 MB, please wait...
+"%VENV_PY%" -m pip install torch torchvision ^
+    --index-url https://download.pytorch.org/whl/cpu -q
 if errorlevel 1 (
     echo.
     echo [ERROR] PyTorch installation failed.
     echo         Check your internet connection and try again.
     goto :done
 )
-"%VENV_PY%" -c "import torch; print('  torch      :', torch.__version__); print('  CUDA avail :', torch.cuda.is_available())"
-echo [OK]   PyTorch installed.
+echo [OK]   PyTorch ^(CPU^) installed.
 echo.
 
 :: ============================================================
-::  STEP 4/6  Required dependencies  (requirements.txt)
-::  Web server, image processing, FAISS, etc. Must all succeed
-::  for LocalMuse to start.
+::  STEP 4/8  Web server  -  FastAPI + uvicorn
 :: ============================================================
-echo [4/6] Installing required dependencies from requirements.txt...
-"%VENV_PY%" -m pip install -r "%REQ%" -q
+echo [4/8] Installing web server: FastAPI + uvicorn...
+"%VENV_PY%" -m pip install "fastapi>=0.110.0" "uvicorn[standard]>=0.29.0" -q
 if errorlevel 1 (
-    echo.
-    echo [ERROR] Failed to install one or more REQUIRED packages.
-    echo         See requirements.txt. Check your internet connection
-    echo         and try again, then re-run setup.bat.
+    echo [ERROR] FastAPI / uvicorn installation failed.
     goto :done
 )
-echo [OK]   Required dependencies installed.
+echo [OK]   FastAPI + uvicorn installed.
 echo.
 
 :: ============================================================
-::  STEP 5/6  Optional dependencies  (requirements-optional.txt)
-::  Pose search, OCR, multilingual search, VLM annotation deps.
-::  LocalMuse runs without these - the matching feature is simply
-::  disabled if a package is missing. Failures here are warnings,
-::  not fatal.
+::  STEP 5/8  Core ML + image libraries
+::  numpy MUST be <2.0  -  CLIP requires the numpy 1.x API.
 :: ============================================================
-echo [5/6] Installing optional dependencies from requirements-optional.txt...
-"%VENV_PY%" -m pip install -r "%REQ_OPT%" -q
+echo [5/8] Installing core ML and image libraries...
+
+echo        Pillow / OpenCV ^(headless^) / numpy ^(pinned ^<2.0^)
+"%VENV_PY%" -m pip install ^
+    "Pillow>=10.0.0" "opencv-python-headless>=4.8.0" "numpy>=1.24.0,<2.0" -q
 if errorlevel 1 (
-    echo [WARN]  One or more optional packages failed to install.
-    echo         The matching feature^(s^) ^(pose search / OCR /
-    echo         multilingual search / annotation^) may be disabled.
-    echo         To retry:
-    echo           "%VENV_PY%" -m pip install -r requirements-optional.txt
+    echo [ERROR] Image library install failed.
+    goto :done
+)
+
+echo        faiss-cpu  ^(vector similarity search^)
+"%VENV_PY%" -m pip install "faiss-cpu>=1.7.4" -q
+if errorlevel 1 (
+    echo [ERROR] faiss-cpu install failed.
+    goto :done
+)
+
+echo        NLP utilities: ftfy regex tqdm timm
+"%VENV_PY%" -m pip install "ftfy>=6.1.1" "regex>=2023.0.0" "tqdm>=4.65.0" "timm>=0.9.0" -q
+if errorlevel 1 (
+    echo [WARN]  Some NLP utilities failed  -  search may be partially affected.
+)
+
+echo [OK]   Core ML + image libraries installed.
+echo.
+
+:: ============================================================
+::  STEP 6/8  Optional: pose search + OCR
+::  These packages are NOT required to start LocalMuse.
+::  Pose and OCR modalities are simply disabled if absent.
+:: ============================================================
+echo [6/8] Installing optional features ^(pose search + OCR^)...
+set OPTIONAL_FAIL=0
+
+"%VENV_PY%" -m pip install "ultralytics>=8.0.0" -q
+if errorlevel 1 (
+    echo [WARN]   ultralytics failed  -  YOLOv8 pose search will be disabled.
+    set OPTIONAL_FAIL=1
 ) else (
-    echo [OK]   Optional dependencies installed.
+    echo [OK]     ultralytics ^(YOLOv8 pose search^)
+)
+
+"%VENV_PY%" -m pip install "easyocr>=1.7.0" -q
+if errorlevel 1 (
+    echo [WARN]   easyocr failed  -  OCR text search will be disabled.
+    set OPTIONAL_FAIL=1
+) else (
+    echo [OK]     easyocr ^(in-image text search^)
+)
+
+if "%OPTIONAL_FAIL%"=="1" (
+    echo.
+    echo [INFO]  To retry optional packages later:
+    echo        "%VENV_PY%" -m pip install ultralytics easyocr
 )
 echo.
 
 :: ============================================================
-::  STEP 6/6  OpenAI CLIP  (requires Git  -  installed from GitHub)
+::  STEP 7/8  OpenAI CLIP  (requires Git  -  installed from GitHub)
 ::  Essential for semantic text-to-image search.
 ::  Not published on PyPI; must be built from source.
 :: ============================================================
-echo [6/6] Installing OpenAI CLIP ^(semantic search engine^)...
+echo [7/8] Installing OpenAI CLIP ^(semantic search engine^)...
 if "%GIT_OK%"=="0" (
     echo [SKIP]  Git not available  -  CLIP skipped.
     echo.
@@ -195,7 +204,7 @@ if "%GIT_OK%"=="0" (
     echo           1. Install Git from https://git-scm.com/download/win
     echo           2. "%VENV_PY%" -m pip install git+https://github.com/openai/CLIP.git
     echo.
-    goto :verify
+    goto :mclip
 )
 
 "%VENV_PY%" -m pip install "git+https://github.com/openai/CLIP.git" -q
@@ -206,6 +215,26 @@ if errorlevel 1 (
     echo.
 ) else (
     echo [OK]   OpenAI CLIP installed.
+)
+echo.
+
+:: ============================================================
+::  STEP 8/8  Optional: Multilingual CLIP (M-CLIP)
+::  Enables Chinese, Japanese, Korean and 50+ other languages.
+::  Uses the SAME indexed image vectors  -  no re-indexing needed.
+:: ============================================================
+:mclip
+echo [8/8] Installing multilingual search support ^(M-CLIP^)...
+echo        Enables Chinese / Japanese / Korean and 50+ language queries.
+echo.
+
+"%VENV_PY%" -m pip install "transformers>=4.30.0" "multilingual-clip>=1.0.0" -q
+if errorlevel 1 (
+    echo [WARN]  M-CLIP install failed  -  search will be English-only.
+    echo.
+    echo         To retry:  "%VENV_PY%" -m pip install transformers multilingual-clip
+) else (
+    echo [OK]   M-CLIP installed  -  multilingual search ENABLED.
 )
 echo.
 
@@ -265,9 +294,6 @@ if errorlevel 1 ( echo   [INFO] ultralytics    not installed  ^<-- pose search D
 
 "%VENV_PY%" -c "import easyocr;     print('  [OK]  easyocr       OK  ^<-- OCR search ENABLED^>')" 2>nul
 if errorlevel 1 ( echo   [INFO] easyocr         not installed  ^<-- OCR search DISABLED^> )
-
-"%VENV_PY%" -c "import qwen_vl_utils, accelerate; print('  [OK]  qwen-vl-utils/accelerate  OK  ^<-- VLM annotation ENABLED^>')" 2>nul
-if errorlevel 1 ( echo   [INFO] qwen-vl-utils/accelerate  not installed  ^<-- VLM annotation DISABLED^> )
 
 echo.
 echo ============================================================

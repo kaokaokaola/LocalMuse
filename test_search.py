@@ -1,246 +1,140 @@
 """
-LocalMuse V2 retrieval test suite.
+LocalMuse V2 — Retrieval Test Suite
+Run from project root:  python test_search.py
 
-Run from the project root:
-    python test_search.py
-
-The test uses in-memory settings so it does not modify user preferences.
-Library path is hardcoded below; change it if needed.
+Tests 8 query combinations and prints ranked results + timing.
+Library path is hardcoded below — change if needed.
 """
 
-from __future__ import annotations
-
-import base64
-import os
-import sys
-import time
-from io import BytesIO
-from typing import Any, Dict, Iterable, Optional
-
-from PIL import Image, ImageDraw
-
+import sys, os, time
 sys.path.insert(0, os.path.dirname(__file__))
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 LIBRARY_PATH = r"E:\30,000test.library"
-TOP_K = 10
+TOP_K = 10  # results to show per test
 
-from src.core import clip_model as clip_module
-from src.infra.index_store import IndexStore
+# ── bootstrap ────────────────────────────────────────────────────────────────
+from src.config.settings import Settings
 from src.infra.library_mgr import LibraryManager
+from src.infra.index_store import IndexStore
 from src.services.searcher import SearchWorker, make_query_context
-
-
-class TestSettings:
-    """Small SearchWorker-compatible settings object that never saves to disk."""
-
-    def __init__(self) -> None:
-        self.language = "zh"
-        self.last_library_path = LIBRARY_PATH
-        self.semantic_enabled = True
-        self.color_enabled = True
-        self.structure_enabled = True
-        self.depth_enabled = False
-        self.pose_enabled = False
-        self.ocr_enabled = False
-        self.semantic_weight = 1.0
-        self.color_weight = 0.6
-        self.structure_weight = 0.8
-        self.depth_weight = 0.5
-        self.pose_weight = 0.5
-        self.top_k = TOP_K
-        self.thumbnail_size = 360
-
-    def effective_weights(self) -> Dict[str, float]:
-        raw = {
-            "semantic": self.semantic_weight if self.semantic_enabled else 0.0,
-            "color": self.color_weight if self.color_enabled else 0.0,
-            "structure": self.structure_weight if self.structure_enabled else 0.0,
-            "depth": self.depth_weight if self.depth_enabled else 0.0,
-            "pose": self.pose_weight if self.pose_enabled else 0.0,
-        }
-        total = sum(raw.values())
-        if total <= 0:
-            return {
-                "semantic": 1.0,
-                "color": 0.0,
-                "structure": 0.0,
-                "depth": 0.0,
-                "pose": 0.0,
-            }
-        return {k: v / total for k, v in raw.items()}
-
-
-def make_data_url(image: Image.Image) -> str:
-    buf = BytesIO()
-    image.save(buf, format="PNG")
-    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
-
-
-def make_structure_sketch() -> str:
-    image = Image.new("RGB", (320, 220), "white")
-    draw = ImageDraw.Draw(image)
-    draw.line((45, 165, 140, 55, 275, 155), fill="black", width=12)
-    draw.line((92, 135, 238, 135), fill="black", width=8)
-    draw.line((140, 55, 140, 165), fill="black", width=7)
-    return make_data_url(image)
-
-
-def reset_weights(cfg: TestSettings) -> None:
-    cfg.semantic_enabled = True
-    cfg.color_enabled = True
-    cfg.structure_enabled = True
-    cfg.depth_enabled = False
-    cfg.pose_enabled = False
-    cfg.semantic_weight = 1.0
-    cfg.color_weight = 0.6
-    cfg.structure_weight = 0.8
-    cfg.depth_weight = 0.5
-    cfg.pose_weight = 0.5
-
-
-def search_context(
-    *,
-    enabled: Iterable[str],
-    text: str = "",
-    color: Optional[tuple[int, int, int]] = None,
-    sketch_data_url: str = "",
-) -> dict:
-    return make_query_context(
-        text=text,
-        color=color,
-        sketch_data_url=sketch_data_url,
-        enabled_modalities=list(enabled),
-        top_k=TOP_K,
-    )
-
+from src.core import clip_model as clip_module
 
 print("=" * 64)
-print("  LocalMuse V2 Retrieval Test Suite")
+print("  LocalMuse V2 — Retrieval Test Suite")
 print("=" * 64)
 
-cfg = TestSettings()
+cfg = Settings()
+cfg.top_k = TOP_K
 
 lib = LibraryManager()
 print(f"\n[1/3] Opening library: {LIBRARY_PATH}")
 t0 = time.perf_counter()
 lib.open_library(LIBRARY_PATH)
-print(f"      {lib.image_count():,} images ({time.perf_counter() - t0:.2f}s)")
+print(f"      {lib.image_count():,} images  ({time.perf_counter()-t0:.2f}s)")
 
 idx = IndexStore()
-print("[2/3] Loading FAISS indices")
+print("[2/3] Loading FAISS indices …")
 t0 = time.perf_counter()
 idx.load(str(lib.index_dir))
 sizes = idx.slot_sizes()
-print(f"      Slots: { {k: v for k, v in sizes.items() if v > 0} } ({time.perf_counter() - t0:.2f}s)")
+print(f"      Slots: { {k:v for k,v in sizes.items() if v>0} }  ({time.perf_counter()-t0:.2f}s)")
 
-print("[3/3] Loading CLIP model")
+print("[3/3] Loading CLIP model …")
 t0 = time.perf_counter()
-clip_module.get_clip_model()
-print(f"      CLIP ready ({time.perf_counter() - t0:.2f}s)")
+clip_module.load_model()
+print(f"      CLIP ready ({time.perf_counter()-t0:.2f}s)")
 
 searcher = SearchWorker(lib, idx, cfg)
-SKETCH_DATA_URL = make_structure_sketch()
 
-
-def run(
-    label: str,
-    ctx: dict,
-    settings_patch: Optional[Dict[str, Any]] = None,
-) -> None:
-    old_values: Dict[str, Any] = {}
+# ── helper ────────────────────────────────────────────────────────────────────
+def run(label, ctx, settings_patch=None):
     if settings_patch:
-        for key, value in settings_patch.items():
-            old_values[key] = getattr(cfg, key)
-            setattr(cfg, key, value)
-    try:
-        t0 = time.perf_counter()
-        results = searcher.run_sync(ctx)
-        elapsed = (time.perf_counter() - t0) * 1000
-        print(f"\n{'=' * 64}")
-        print(f"  TEST: {label}")
-        print(f"  Time: {elapsed:.0f} ms   |   Results: {len(results)}")
-        print("=" * 64)
-        for index, result in enumerate(results[:TOP_K], 1):
-            name = result.get("meta", {}).get("name", result["uid"])[:40]
-            score = result.get("score", 0.0)
-            per_modal = result.get("per_modal", {})
-            modal_text = "  ".join(
-                f"{key[:3]}={value:.2f}"
-                for key, value in per_modal.items()
-                if value > 0.01
-            )
-            print(f"  {index:>2}. [{score:.3f}] {name:<42}  {modal_text}")
-    finally:
-        for key, value in old_values.items():
-            setattr(cfg, key, value)
+        for k, v in settings_patch.items():
+            setattr(cfg, k, v)
+    t0 = time.perf_counter()
+    results = searcher.run_sync(ctx)
+    elapsed = (time.perf_counter() - t0) * 1000
+    print(f"\n{'─'*64}")
+    print(f"  TEST: {label}")
+    print(f"  Time: {elapsed:.0f} ms   |   Results: {len(results)}")
+    print(f"{'─'*64}")
+    for i, r in enumerate(results[:TOP_K], 1):
+        name  = r.get("meta", {}).get("name", r["uid"])[:40]
+        score = r.get("score", 0)
+        pm    = r.get("per_modal", {})
+        pm_str = "  ".join(
+            f"{k[:3]}={v:.2f}" for k, v in pm.items() if v > 0.01
+        )
+        print(f"  {i:>2}. [{score:.3f}] {name:<42}  {pm_str}")
+    # reset any patched settings
+    if settings_patch:
+        for k in settings_patch:
+            setattr(cfg, k, Settings._DEFAULTS.get(k, getattr(Settings(), k, None)) 
+                    if hasattr(Settings, '_DEFAULTS') else None)
 
+# ── reset weights helper ──────────────────────────────────────────────────────
+def reset_weights():
+    cfg.semantic_enabled  = True;  cfg.semantic_weight   = 1.0
+    cfg.color_enabled     = True;  cfg.color_weight      = 0.6
+    cfg.structure_enabled = True;  cfg.structure_weight  = 0.8
+    cfg.depth_enabled     = False
+    cfg.pose_enabled      = False
 
-tests = [
-    (
-        "Semantic only: concrete brutalist heavy mass",
-        search_context(enabled=["semantic"], text="concrete brutalist heavy mass"),
-        None,
-    ),
-    (
-        "Semantic only: Tadao Ando light shadow concrete",
-        search_context(enabled=["semantic"], text="Tadao Ando light shadow concrete"),
-        None,
-    ),
-    (
-        "Semantic + Color: timber warm interior + warm orange",
-        search_context(
-            enabled=["semantic", "color"],
-            text="timber warm interior",
-            color=(180, 120, 60),
-        ),
-        None,
-    ),
-    (
-        "Semantic + Color: glass steel curtain wall + grey",
-        search_context(
-            enabled=["semantic", "color"],
-            text="glass steel curtain wall",
-            color=(160, 165, 170),
-        ),
-        None,
-    ),
-    (
-        "Semantic + Sketch: minimalist void space + synthetic sketch",
-        search_context(
-            enabled=["semantic", "sketch"],
-            text="minimalist void space",
-            sketch_data_url=SKETCH_DATA_URL,
-        ),
-        {"structure_weight": 2.0},
-    ),
-    (
-        "Sketch only: synthetic roof/courtyard sketch",
-        search_context(enabled=["sketch"], sketch_data_url=SKETCH_DATA_URL),
-        None,
-    ),
-    (
-        "Color only: dark dramatic",
-        search_context(enabled=["color"], color=(20, 20, 30)),
-        None,
-    ),
-    (
-        "Full multimodal: organic biophilic courtyard + green + sketch",
-        search_context(
-            enabled=["semantic", "color", "sketch"],
-            text="organic biophilic courtyard",
-            color=(80, 120, 70),
-            sketch_data_url=SKETCH_DATA_URL,
-        ),
-        None,
-    ),
-]
+# ════════════════════════════════════════════════════════════════════════════════
+#  TEST CASES
+# ════════════════════════════════════════════════════════════════════════════════
 
-for label, ctx, patch in tests:
-    reset_weights(cfg)
-    run(label, ctx, patch)
+# T1: Text only — broad architectural query
+reset_weights()
+cfg.color_enabled = False; cfg.structure_enabled = False
+run("Text only — 'concrete brutalist heavy mass'",
+    make_query_context(text="concrete brutalist heavy mass"))
 
-print(f"\n{'=' * 64}")
+# T2: Text only — Japanese minimalism
+reset_weights()
+cfg.color_enabled = False; cfg.structure_enabled = False
+run("Text only — 'Tadao Ando light shadow concrete'",
+    make_query_context(text="Tadao Ando light shadow concrete"))
+
+# T3: Text + Color (warm tones)
+reset_weights()
+cfg.structure_enabled = False
+run("Text + Color — 'timber warm interior' + warm orange",
+    make_query_context(text="timber warm interior", color=(180, 120, 60)))
+
+# T4: Text + Color (cool/grey)
+reset_weights()
+cfg.structure_enabled = False
+run("Text + Color — 'glass steel curtain wall' + grey",
+    make_query_context(text="glass steel curtain wall", color=(160, 165, 170)))
+
+# T5: Text + Structure (high structure weight)
+reset_weights()
+cfg.color_enabled     = False
+cfg.structure_weight  = 2.0
+run("Text + Structure (boosted) — 'minimalist void space'",
+    make_query_context(text="minimalist void space"))
+
+# T6: Color only — dark dramatic
+reset_weights()
+cfg.semantic_enabled  = False
+cfg.structure_enabled = False
+run("Color only — dark dramatic (20, 20, 30)",
+    make_query_context(color=(20, 20, 30)))
+
+# T7: Color only — soft white
+reset_weights()
+cfg.semantic_enabled  = False
+cfg.structure_enabled = False
+run("Color only — soft white (240, 238, 232)",
+    make_query_context(color=(240, 238, 232)))
+
+# T8: Full multimodal — Text + Color + Structure
+reset_weights()
+run("Full multimodal — 'organic biophilic courtyard' + green + structure",
+    make_query_context(text="organic biophilic courtyard", color=(80, 120, 70)))
+
+print(f"\n{'='*64}")
 print("  All tests complete.")
-print(f"{'=' * 64}\n")
+print(f"{'='*64}\n")
