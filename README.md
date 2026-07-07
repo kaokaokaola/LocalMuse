@@ -1,9 +1,14 @@
+
+
+https://github.com/user-attachments/assets/3b468fb9-9911-4ee7-abfb-8bec16612bbe
+
 # LocalMuse V2.1
 
 Multimodal local image search for designers — search your reference library by **meaning, sketch, structure/depth, and pose**, entirely on your own machine. No cloud, no upload, no subscription.
 
 > Companion project for a paper presented at **CDRF 2026**. This repository hosts the V2 implementation. **v2.1** is the current release — see [What's New](#whats-new-in-v21) below.
 
+https://github.com/user-attachments/assets/3b468fb9-9911-4ee7-abfb-8bec16612bbe
 ---
 
 ## What's New in v2.1
