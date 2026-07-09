@@ -1,3 +1,8 @@
+
+
+https://github.com/user-attachments/assets/6c7b313f-46c2-472c-9c5f-7335e6ee6a13
+
+
 # LocalMuse V2.1 使用说明 / User Guide
 
 LocalMuse 是一个本地运行的图片资料库和灵感检索工具，面向建筑、空间、室内、景观、产品参考图等视觉资料管理场景。它可以在本机建立 `.library` 图库，导入图片、生成缩略图和向量索引，并支持语义搜索、草图搜索、颜色搜索、重复/翻转图像检测、软删除回收站和自动标签。
